@@ -1,5 +1,5 @@
 import { httpServer } from "./http_server/index.js";
-import { createWSServer } from "./ws_server.js";
+import { createWSServer } from "./ws_server/ws_server.js";
 
 const HTTP_PORT = 8181;
 const WS_PORT = 3000;
