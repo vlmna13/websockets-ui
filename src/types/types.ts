@@ -1,47 +1,82 @@
 import { WebSocket } from "ws";
 
-export type ShipType = "small" | "medium" | "large" | "huge";
-
-export interface Ship {
-  position: {
-    x: number;
-    y: number;
-  };
-  direction: boolean;
-  length: number;
-  type: ShipType;
+export interface User {
+  name: string;
+  index: number;
 }
 
-export interface Player {
-  name: string;
+export interface Player extends User {
   password: string;
-  index: number;
   wins: number;
   ws?: WebSocket;
 }
 
 export interface Room {
   roomId: number;
-  roomUsers: {
-    name: string;
-    index: number;
-  }[];
+  roomUsers: User[];
+}
+
+export interface Position {
+  x: number;
+  y: number;
+}
+
+export interface Ship {
+  position: Position;
+  direction: boolean;
+  length: number;
+  type: "small" | "medium" | "large" | "huge";
+}
+
+export type CellState = 0 | 1 | 2;
+export type Board = CellState[][];
+
+export interface GamePlayer {
+  index: number;
+  ships: Ship[];
+  board: Board;
 }
 
 export interface Game {
   idGame: number;
-  players: {
-    index: number;
-    ships: Ship[];
-    board: (0 | 1 | 2)[][];
-  }[];
+  players: GamePlayer[];
   currentPlayerIndex: number;
 }
 
 export interface WebSocketMessage {
-  type: string;
+  type: MessageType;
   data: string;
-  id: 0;
+  id: number;
+}
+
+export type MessageType = 
+  | "reg"
+  | "create_room"
+  | "add_user_to_room"
+  | "add_ships"
+  | "attack"
+  | "randomAttack"
+  | "turn"
+  | "finish"
+  | "start_game"
+  | "create_game"
+  | "update_room"
+  | "update_winners"
+  | "error";
+
+export interface RegData {
+  name: string;
+  password: string;
+}
+
+export interface RoomData {
+  indexRoom: number;
+}
+
+export interface AddShipsData {
+  gameId: number;
+  ships: Ship[];
+  indexPlayer: number;
 }
 
 export interface AttackData {
@@ -56,15 +91,35 @@ export interface RandomAttackData {
   indexPlayer: number;
 }
 
-export interface AttackResult {
-  position: {
-    x: number;
-    y: number;
-  };
-  currentPlayer: number;
-  status: "miss" | "killed" | "shot";
+export interface RegResponse {
+  name: string;
+  index: number;
+  error: boolean;
+  errorText: string;
 }
 
-export interface FinishGameData {
+export interface GameCreatedResponse {
+  idGame: number;
+  idPlayer: number;
+}
+
+export interface AttackResponse {
+  position: Position;
+  currentPlayer: number;
+  status: "miss" | "shot" | "killed";
+}
+
+export interface TurnResponse {
+  currentPlayer: number;
+}
+
+export interface FinishResponse {
   winPlayer: number;
 }
+
+export interface WinnersResponse {
+  name: string;
+  wins: number;
+}
+
+export type AttackStatus = "miss" | "shot" | "killed";

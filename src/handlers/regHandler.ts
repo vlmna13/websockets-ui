@@ -5,77 +5,94 @@ import {
   broadcastUpdateRoom,
   broadcastUpdateWinners,
 } from "./broadcastHandler";
+import { Player, RegData, RegResponse } from "../types/types";
 
-export const handleReg = (ws: WebSocket, data: any) => {
+export const handleReg = (ws: WebSocket, data: RegData): void => {
   const { name, password } = data;
-
   if (!name || !password) {
-    ws.send(
-      JSON.stringify({
-        type: "reg",
-        data: JSON.stringify({
-          name: name || "",
-          index: 0,
-          error: true,
-          errorText: "Name and password are required",
-        }),
-        id: 0,
-      })
-    );
+    sendRegistrationError(ws, name || "", "Name and password are required");
     return;
   }
+
   const existingPlayer = db.findPlayerByName(name);
 
   if (existingPlayer) {
-    if (existingPlayer.password !== password) {
-      ws.send(
-        JSON.stringify({
-          type: "reg",
-          data: JSON.stringify({
-            name,
-            index: 0,
-            error: true,
-            errorText: "Invalid password",
-          }),
-          id: 0,
-        })
-      );
-      return;
-    }
-
-    db.updatePlayerWs(existingPlayer.index, ws);
-    sessionManager.loginPlayer(ws, existingPlayer.index);
-
-    ws.send(
-      JSON.stringify({
-        type: "reg",
-        data: JSON.stringify({
-          name: existingPlayer.name,
-          index: existingPlayer.index,
-          error: false,
-          errorText: "",
-        }),
-        id: 0,
-      })
-    );
+    handleExistingPlayer(ws, existingPlayer, password, name);
   } else {
-    const newPlayer = db.addPlayer(name, password);
-    db.updatePlayerWs(newPlayer.index, ws);
-    sessionManager.loginPlayer(ws, newPlayer.index);
-
-    ws.send(
-      JSON.stringify({
-        type: "reg",
-        data: JSON.stringify({
-          name: newPlayer.name,
-          index: newPlayer.index,
-          error: false,
-          errorText: "",
-        }),
-        id: 0,
-      })
-    );
+    handleNewPlayer(ws, name, password);
   }
+
   broadcastUpdateRoom();
   broadcastUpdateWinners();
+};
+
+const handleExistingPlayer = (
+  ws: WebSocket,
+  player: Player,
+  password: string,
+  name: string
+): void => {
+  if (player.password !== password) {
+    sendRegistrationError(ws, name, "Invalid password");
+    return;
+  }
+
+  db.updatePlayerWs(player.index, ws);
+  sessionManager.loginPlayer(ws, player.index);
+
+  sendRegistrationSuccess(ws, player.name, player.index);
+};
+
+const handleNewPlayer = (
+  ws: WebSocket,
+  name: string,
+  password: string
+): void => {
+  const newPlayer = db.addPlayer(name, password);
+  db.updatePlayerWs(newPlayer.index, ws);
+  sessionManager.loginPlayer(ws, newPlayer.index);
+
+  sendRegistrationSuccess(ws, newPlayer.name, newPlayer.index);
+};
+
+const sendRegistrationError = (
+  ws: WebSocket,
+  name: string,
+  errorText: string
+): void => {
+  const response: RegResponse = {
+    name,
+    index: 0,
+    error: true,
+    errorText,
+  };
+
+  ws.send(
+    JSON.stringify({
+      type: "reg",
+      data: JSON.stringify(response),
+      id: 0,
+    })
+  );
+};
+
+const sendRegistrationSuccess = (
+  ws: WebSocket,
+  name: string,
+  index: number
+): void => {
+  const response: RegResponse = {
+    name,
+    index,
+    error: false,
+    errorText: "",
+  };
+
+  ws.send(
+    JSON.stringify({
+      type: "reg",
+      data: JSON.stringify(response),
+      id: 0,
+    })
+  );
 };

@@ -2,33 +2,22 @@ import { WebSocket } from "ws";
 import { db } from "../database/dataBase";
 import { sessionManager } from "../session/sessionManager";
 import { broadcastUpdateRoom, sendToPlayer } from "./broadcastHandler";
+import { Room, RoomData, User } from "../types/types";
+import { sendError, sendSuccess } from "../utils/wsUtils";
 
-export const handleCreateRoom = (ws: WebSocket) => {
+export const handleCreateRoom = (ws: WebSocket): void => {
   const playerIndex = sessionManager.getPlayerIndex(ws);
 
   if (!playerIndex) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        data: JSON.stringify({ error: true, errorText: "Not authenticated" }),
-        id: 0,
-      })
-    );
+    sendError(ws, "Not authenticated");
     return;
   }
 
   const player = db.getPlayerByIndex(playerIndex);
   if (!player) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        data: JSON.stringify({ error: true, errorText: "Player not found" }),
-        id: 0,
-      })
-    );
+    sendError(ws, "Player not found");
     return;
   }
-
   const currentRoom = db.getRoomByPlayerIndex(playerIndex);
   if (currentRoom) {
     db.removeRoom(currentRoom.roomId);
@@ -36,58 +25,29 @@ export const handleCreateRoom = (ws: WebSocket) => {
   }
 
   const room = db.createRoom(player.name, playerIndex);
-
   console.log(`Room created: ${room.roomId} by player: ${player.name}`);
-  broadcastUpdateRoom();
 
-  ws.send(
-    JSON.stringify({
-      type: "create_room",
-      data: JSON.stringify({}),
-      id: 0,
-    })
-  );
+  broadcastUpdateRoom();
+  sendSuccess(ws, "create_room");
 };
 
-export const handleAddUserToRoom = (ws: WebSocket, data: any) => {
+export const handleAddUserToRoom = (ws: WebSocket, data: RoomData): void => {
   const { indexRoom } = data;
   const playerIndex = sessionManager.getPlayerIndex(ws);
 
   if (!playerIndex) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        data: JSON.stringify({ error: true, errorText: "Not authenticated" }),
-        id: 0,
-      })
-    );
+    sendError(ws, "Not authenticated");
     return;
   }
 
   const player = db.getPlayerByIndex(playerIndex);
   if (!player) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        data: JSON.stringify({ error: true, errorText: "Player not found" }),
-        id: 0,
-      })
-    );
+    sendError(ws, "Player not found");
     return;
   }
-
   const targetRoom = db.getRoomById(indexRoom);
   if (targetRoom && targetRoom.roomUsers[0].index === playerIndex) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        data: JSON.stringify({
-          error: true,
-          errorText: "Cannot join your own room",
-        }),
-        id: 0,
-      })
-    );
+    sendError(ws, "Cannot join your own room");
     return;
   }
 
@@ -100,77 +60,50 @@ export const handleAddUserToRoom = (ws: WebSocket, data: any) => {
   }
 
   if (currentRoom && currentRoom.roomId === indexRoom) {
-    ws.send(
-      JSON.stringify({
-        type: "add_user_to_room",
-        data: JSON.stringify({}),
-        id: 0,
-      })
-    );
+    sendSuccess(ws, "add_user_to_room");
     return;
   }
 
   const room = db.getRoomById(indexRoom);
   if (!room) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        data: JSON.stringify({ error: true, errorText: "Room not found" }),
-        id: 0,
-      })
-    );
+    sendError(ws, "Room not found");
     return;
   }
-
   const success = db.addPlayerToRoom(indexRoom, player.name, playerIndex);
 
   if (success) {
     console.log(`Player ${player.name} joined room ${indexRoom}`);
+
     const updatedRoom = db.getRoomById(indexRoom);
     if (updatedRoom && updatedRoom.roomUsers.length === 2) {
-      const game = db.createGame(
-        updatedRoom.roomUsers[0].index,
-        updatedRoom.roomUsers[1].index
-      );
-
-      console.log(
-        `Game created: ${game.idGame} with players: ${updatedRoom.roomUsers[0].name} and ${updatedRoom.roomUsers[1].name}`
-      );
-      updatedRoom.roomUsers.forEach((user) => {
-        sendToPlayer(
-          user.index,
-          JSON.stringify({
-            type: "create_game",
-            data: JSON.stringify({
-              idGame: game.idGame,
-              idPlayer: user.index,
-            }),
-            id: 0,
-          })
-        );
-      });
-
-      db.removeRoom(indexRoom);
-      broadcastUpdateRoom();
+      createGameFromRoom(updatedRoom);
     }
 
-    ws.send(
-      JSON.stringify({
-        type: "add_user_to_room",
-        data: JSON.stringify({}),
-        id: 0,
-      })
-    );
+    sendSuccess(ws, "add_user_to_room");
   } else {
-    ws.send(
+    sendError(ws, "Cannot join room - room may be full");
+  }
+};
+
+const createGameFromRoom = (room: Room): void => {
+  const game = db.createGame(room.roomUsers[0].index, room.roomUsers[1].index);
+
+  console.log(
+    `Game created: ${game.idGame} with players: ${room.roomUsers[0].name} and ${room.roomUsers[1].name}`
+  );
+  room.roomUsers.forEach((user: User) => {
+    sendToPlayer(
+      user.index,
       JSON.stringify({
-        type: "error",
+        type: "create_game",
         data: JSON.stringify({
-          error: true,
-          errorText: "Cannot join room - room may be full",
+          idGame: game.idGame,
+          idPlayer: user.index,
         }),
         id: 0,
       })
     );
-  }
+  });
+  db.removeRoom(room.roomId);
+  broadcastUpdateRoom();
 };

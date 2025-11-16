@@ -1,46 +1,47 @@
-import { sessionManager } from '../session/sessionManager';
-import { db } from '../database/dataBase';
+import { sessionManager } from "../session/sessionManager";
+import { db } from "../database/dataBase";
+import { Room, Player } from "../types/types";
+import { WebSocket } from "ws";
 
-export const broadcastUpdateRoom = () => {
+export const broadcastUpdateRoom = (): void => {
   const rooms = db.getRooms();
-  const message = JSON.stringify({
-    type: 'update_room',
-    data: JSON.stringify(rooms),
-    id: 0
-  });
-
+  const message = createMessage("update_room", rooms);
   broadcastToAll(message);
 };
 
-export const broadcastUpdateWinners = () => {
-  const winners = db.getAllPlayers()
-    .filter(player => player.wins > 0)
-    .map(player => ({
+export const broadcastUpdateWinners = (): void => {
+  const winners = db
+    .getAllPlayers()
+    .filter((player: Player) => player.wins > 0)
+    .map((player: Player) => ({
       name: player.name,
-      wins: player.wins
+      wins: player.wins,
     }));
 
-  const message = JSON.stringify({
-    type: 'update_winners',
-    data: JSON.stringify(winners),
-    id: 0
-  });
-
+  const message = createMessage("update_winners", winners);
   broadcastToAll(message);
 };
 
-export const broadcastToAll = (message: string) => {
+export const broadcastToAll = (message: string): void => {
   const allSockets = sessionManager.getAllSockets();
-  allSockets.forEach(ws => {
+  allSockets.forEach((ws: WebSocket) => {
     if (ws.readyState === ws.OPEN) {
       ws.send(message);
     }
   });
 };
 
-export const sendToPlayer = (playerIndex: number, message: string) => {
+export const sendToPlayer = (playerIndex: number, message: string): void => {
   const ws = sessionManager.getSocket(playerIndex);
   if (ws && ws.readyState === ws.OPEN) {
     ws.send(message);
   }
+};
+
+const createMessage = (type: string, data: any): string => {
+  return JSON.stringify({
+    type,
+    data: JSON.stringify(data),
+    id: 0,
+  });
 };

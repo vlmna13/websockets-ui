@@ -1,31 +1,22 @@
 import { WebSocket } from "ws";
 import { db } from "../database/dataBase";
-import { sessionManager } from "../session/sessionManager.js";
-import { sendToPlayer } from "./broadcastHandler.js";
+import { sessionManager } from "../session/sessionManager";
+import { sendToPlayer } from "./broadcastHandler";
+import { AddShipsData, Game } from "../types/types";
+import { sendError, sendSuccess } from "../utils/wsUtils";
 
-export const handleAddShips = (ws: WebSocket, data: any) => {
+export const handleAddShips = (ws: WebSocket, data: AddShipsData): void => {
   const { gameId, ships, indexPlayer } = data;
   const playerIndex = sessionManager.getPlayerIndex(ws);
+
   if (!playerIndex) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        data: JSON.stringify({ error: true, errorText: "Not authenticated" }),
-        id: 0,
-      })
-    );
+    sendError(ws, "Not authenticated");
     return;
   }
 
   const game = db.getGameById(gameId);
   if (!game) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        data: JSON.stringify({ error: true, errorText: "Game not found" }),
-        id: 0,
-      })
-    );
+    sendError(ws, "Game not found");
     return;
   }
 
@@ -34,29 +25,20 @@ export const handleAddShips = (ws: WebSocket, data: any) => {
     playerInGame.ships = ships;
     console.log(`Ships added for player ${indexPlayer} in game ${gameId}`);
   }
-
-  ws.send(
-    JSON.stringify({
-      type: "add_ships",
-      data: JSON.stringify({ success: true }),
-      id: 0,
-    })
-  );
-
+  sendSuccess(ws, "add_ships");
   checkGameStart(game);
 };
 
-const checkGameStart = (game: any) => {
+const checkGameStart = (game: Game): void => {
   const bothPlayersReady = game.players.every(
-    (player: any) => player.ships && player.ships.length > 0
+    (player) => player.ships && player.ships.length > 0
   );
 
   if (bothPlayersReady) {
     console.log(
       `Starting game ${game.idGame} - both players have placed ships`
     );
-
-    game.players.forEach((player: any) => {
+    game.players.forEach((player) => {
       sendToPlayer(
         player.index,
         JSON.stringify({
@@ -78,8 +60,8 @@ const checkGameStart = (game: any) => {
   }
 };
 
-const sendTurnInfo = (game: any) => {
-  game.players.forEach((player: any) => {
+const sendTurnInfo = (game: Game): void => {
+  game.players.forEach((player) => {
     sendToPlayer(
       player.index,
       JSON.stringify({

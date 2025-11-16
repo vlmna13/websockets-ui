@@ -1,148 +1,117 @@
 import { WebSocket } from "ws";
 import { db } from "../database/dataBase";
 import { sessionManager } from "../session/sessionManager";
-import { sendToPlayer } from "./broadcastHandler";
+import { GameLogicService } from "../services/gameLogicService";
+import { sendError, createMessage } from "../utils/wsUtils";
+import { updateWinners, sendTurnInfo } from "../utils/gameUtils";
+import {
+  AttackData,
+  RandomAttackData,
+  Position,
+  AttackStatus,
+  Ship,
+  Board,
+  Game,
+  GamePlayer,
+} from "../types/types";
 
-export const handleAttack = (ws: WebSocket, data: any) => {
+export const handleAttack = (ws: WebSocket, data: AttackData): void => {
   const { gameId, x, y, indexPlayer } = data;
   const playerIndex = sessionManager.getPlayerIndex(ws);
 
-  if (!playerIndex) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        data: JSON.stringify({ error: true, errorText: "Not authenticated" }),
-        id: 0,
-      })
-    );
+  if (!validateAttack(ws, playerIndex, gameId, indexPlayer)) {
     return;
   }
 
   const game = db.getGameById(gameId);
+  const opponent = game!.players.find((p) => p.index !== indexPlayer);
+
+  if (!game || !opponent) {
+    sendError(ws, "Game or opponent not found");
+    return;
+  }
+
+  processAttack(game, opponent, { x, y }, indexPlayer);
+};
+
+export const handleRandomAttack = (
+  ws: WebSocket,
+  data: RandomAttackData
+): void => {
+  const { gameId, indexPlayer } = data;
+  const playerIndex = sessionManager.getPlayerIndex(ws);
+
+  if (!validateAttack(ws, playerIndex, gameId, indexPlayer)) {
+    return;
+  }
+
+  const game = db.getGameById(gameId);
+  const opponent = game!.players.find((p) => p.index !== indexPlayer);
+
+  if (!game || !opponent) {
+    sendError(ws, "Game or opponent not found");
+    return;
+  }
+
+  const position = GameLogicService.getRandomAttackPosition(opponent.board);
+  processAttack(game, opponent, position, indexPlayer);
+};
+
+const validateAttack = (
+  ws: WebSocket,
+  playerIndex: number | undefined,
+  gameId: number,
+  attackerIndex: number
+): boolean => {
+  if (!playerIndex) {
+    sendError(ws, "Not authenticated");
+    return false;
+  }
+
+  const game = db.getGameById(gameId);
   if (!game) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        data: JSON.stringify({ error: true, errorText: "Game not found" }),
-        id: 0,
-      })
-    );
-    return;
+    sendError(ws, "Game not found");
+    return false;
   }
 
-  if (game.currentPlayerIndex !== indexPlayer) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        data: JSON.stringify({ error: true, errorText: "Not your turn" }),
-        id: 0,
-      })
-    );
-    return;
+  if (game.currentPlayerIndex !== attackerIndex) {
+    sendError(ws, "Not your turn");
+    return false;
   }
 
-  const opponent = game.players.find((p) => p.index !== indexPlayer);
+  const opponent = game.players.find((p) => p.index !== attackerIndex);
   if (!opponent) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        data: JSON.stringify({ error: true, errorText: "Opponent not found" }),
-        id: 0,
-      })
-    );
-    return;
+    sendError(ws, "Opponent not found");
+    return false;
   }
 
-  const hitShip = opponent.ships.find((ship) => checkShipHit(ship, x, y));
+  return true;
+};
 
-  let status: "miss" | "shot" | "killed" = "miss";
+const processAttack = (
+  game: Game,
+  opponent: GamePlayer,
+  position: Position,
+  attackerIndex: number
+): void => {
+  const { x, y } = position;
+
+  if (!opponent.board[x]) {
+    opponent.board[x] = [];
+  }
+
+  const hitShip = opponent.ships.find((ship) =>
+    GameLogicService.checkShipHit(ship, x, y)
+  );
+
   let shouldChangeTurn = false;
 
   if (hitShip) {
-    if (!opponent.board[x]) opponent.board[x] = [];
     opponent.board[x][y] = 2;
-
-    if (isShipKilled(hitShip, opponent.board)) {
-      status = "killed";
-
-      const missedCells = markAroundShip(hitShip, opponent.board);
-
-      game.players.forEach((player) => {
-        sendToPlayer(
-          player.index,
-          JSON.stringify({
-            type: "attack",
-            data: JSON.stringify({
-              position: { x, y },
-              currentPlayer: game.currentPlayerIndex,
-              status: "killed",
-            }),
-            id: 0,
-          })
-        );
-      });
-
-      missedCells.forEach((cell) => {
-        game.players.forEach((player) => {
-          sendToPlayer(
-            player.index,
-            JSON.stringify({
-              type: "attack",
-              data: JSON.stringify({
-                position: { x: cell.x, y: cell.y },
-                currentPlayer: game.currentPlayerIndex,
-                status: "miss",
-              }),
-              id: 0,
-            })
-          );
-        });
-      });
-      if (checkGameFinished(opponent)) {
-        finishGame(game, indexPlayer);
-        return;
-      }
-      shouldChangeTurn = false;
-    } else {
-      status = "shot";
-
-      game.players.forEach((player) => {
-        sendToPlayer(
-          player.index,
-          JSON.stringify({
-            type: "attack",
-            data: JSON.stringify({
-              position: { x, y },
-              currentPlayer: game.currentPlayerIndex,
-              status: "shot",
-            }),
-            id: 0,
-          })
-        );
-      });
-
-      shouldChangeTurn = false;
-    }
+    handleShipHit(game, opponent, hitShip, position, attackerIndex);
   } else {
-    status = "miss";
-    if (!opponent.board[x]) opponent.board[x] = [];
     opponent.board[x][y] = 1;
-
-    game.players.forEach((player) => {
-      sendToPlayer(
-        player.index,
-        JSON.stringify({
-          type: "attack",
-          data: JSON.stringify({
-            position: { x, y },
-            currentPlayer: game.currentPlayerIndex,
-            status: "miss",
-          }),
-          id: 0,
-        })
-      );
-    });
-
+    handleMiss(game, position);
     shouldChangeTurn = true;
     game.currentPlayerIndex = opponent.index;
   }
@@ -152,180 +121,66 @@ export const handleAttack = (ws: WebSocket, data: any) => {
   }
 };
 
-export const handleRandomAttack = (ws: WebSocket, data: any) => {
-  const { gameId, indexPlayer } = data;
-  const playerIndex = sessionManager.getPlayerIndex(ws);
-
-  if (!playerIndex) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        data: JSON.stringify({ error: true, errorText: "Not authenticated" }),
-        id: 0,
-      })
+const handleShipHit = (
+  game: Game,
+  opponent: GamePlayer,
+  hitShip: Ship,
+  position: Position,
+  attackerIndex: number
+): void => {
+  if (GameLogicService.isShipKilled(hitShip, opponent.board)) {
+    broadcastAttack(game, position, "killed");
+    const missedCells = GameLogicService.markAroundShip(
+      hitShip,
+      opponent.board
     );
-    return;
-  }
+    missedCells.forEach((cell) => {
+      broadcastAttack(game, cell, "miss");
+    });
 
-  const game = db.getGameById(gameId);
-  if (!game) {
-    ws.send(
-      JSON.stringify({
-        type: "error",
-        data: JSON.stringify({ error: true, errorText: "Game not found" }),
-        id: 0,
-      })
-    );
-    return;
-  }
-
-  const opponent = game.players.find((p) => p.index !== indexPlayer);
-  if (!opponent) return;
-
-  let x, y;
-  let attempts = 0;
-  const maxAttempts = 100;
-
-  do {
-    x = Math.floor(Math.random() * 10);
-    y = Math.floor(Math.random() * 10);
-    attempts++;
-
-    if (attempts >= maxAttempts) {
-      let found = false;
-      for (let i = 0; i < 10 && !found; i++) {
-        for (let j = 0; j < 10 && !found; j++) {
-          if (!opponent.board[i] || opponent.board[i][j] === undefined) {
-            x = i;
-            y = j;
-            found = true;
-          }
-        }
-      }
-      break;
-    }
-  } while (opponent.board[x] && opponent.board[x][y] !== undefined);
-
-  handleAttack(ws, { gameId, x, y, indexPlayer });
-};
-
-const checkShipHit = (ship: any, x: number, y: number): boolean => {
-  if (ship.direction) {
-    return (
-      ship.position.x === x &&
-      y >= ship.position.y &&
-      y < ship.position.y + ship.length
-    );
-  } else {
-    return (
-      ship.position.y === y &&
-      x >= ship.position.x &&
-      x < ship.position.x + ship.length
-    );
-  }
-};
-
-const isShipKilled = (ship: any, board: any[][]): boolean => {
-  if (ship.direction) {
-    for (let i = 0; i < ship.length; i++) {
-      if (board[ship.position.x]?.[ship.position.y + i] !== 2) {
-        return false;
-      }
+    if (GameLogicService.checkGameFinished(opponent)) {
+      finishGame(game, attackerIndex);
+      return;
     }
   } else {
-    for (let i = 0; i < ship.length; i++) {
-      if (board[ship.position.x + i]?.[ship.position.y] !== 2) {
-        return false;
-      }
-    }
+    broadcastAttack(game, position, "shot");
   }
-  return true;
 };
 
-const markAroundShip = (
-  ship: any,
-  board: any[][]
-): { x: number; y: number }[] => {
-  const missedCells: { x: number; y: number }[] = [];
+const handleMiss = (game: Game, position: Position): void => {
+  broadcastAttack(game, position, "miss");
+};
 
-  const startX = Math.max(0, ship.position.x - 1);
-  const endX = Math.min(
-    9,
-    ship.direction ? ship.position.x + 1 : ship.position.x + ship.length
-  );
-  const startY = Math.max(0, ship.position.y - 1);
-  const endY = Math.min(
-    9,
-    ship.direction ? ship.position.y + ship.length : ship.position.y + 1
-  );
+const broadcastAttack = (
+  game: Game,
+  position: Position,
+  status: AttackStatus
+): void => {
+  const message = createMessage("attack", {
+    position,
+    currentPlayer: game.currentPlayerIndex,
+    status,
+  });
 
-  for (let x = startX; x <= endX; x++) {
-    for (let y = startY; y <= endY; y++) {
-      const isShipCell = checkShipHit(ship, x, y);
-
-      if (!isShipCell) {
-        if (!board[x]) board[x] = [];
-        if (board[x][y] === undefined || board[x][y] === 0) {
-          board[x][y] = 1;
-          missedCells.push({ x, y });
-        }
-      }
+  game.players.forEach((player) => {
+    const ws = sessionManager.getSocket(player.index);
+    if (ws && ws.readyState === ws.OPEN) {
+      ws.send(message);
     }
-  }
-
-  return missedCells;
+  });
 };
 
-const checkGameFinished = (player: any): boolean => {
-  return player.ships.every((ship: any) => isShipKilled(ship, player.board));
-};
-
-const finishGame = (game: any, winnerIndex: number) => {
+const finishGame = (game: Game, winnerIndex: number): void => {
   const winner = db.getPlayerByIndex(winnerIndex);
   if (winner) {
     winner.wins++;
   }
-  game.players.forEach((player: any) => {
-    sendToPlayer(
-      player.index,
-      JSON.stringify({
-        type: "finish",
-        data: JSON.stringify({ winPlayer: winnerIndex }),
-        id: 0,
-      })
-    );
+  game.players.forEach((player) => {
+    const ws = sessionManager.getSocket(player.index);
+    if (ws && ws.readyState === ws.OPEN) {
+      ws.send(createMessage("finish", { winPlayer: winnerIndex }));
+    }
   });
-  const winners = db
-    .getAllPlayers()
-    .filter((player) => player.wins > 0)
-    .map((player) => ({
-      name: player.name,
-      wins: player.wins,
-    }));
-
-  const winnersMessage = JSON.stringify({
-    type: "update_winners",
-    data: JSON.stringify(winners),
-    id: 0,
-  });
-
-  game.players.forEach((player: any) => {
-    sendToPlayer(player.index, winnersMessage);
-  });
+  updateWinners();
   db.removeGame(game.idGame);
-};
-
-const sendTurnInfo = (game: any) => {
-  game.players.forEach((player: any) => {
-    sendToPlayer(
-      player.index,
-      JSON.stringify({
-        type: "turn",
-        data: JSON.stringify({
-          currentPlayer: game.currentPlayerIndex,
-        }),
-        id: 0,
-      })
-    );
-  });
 };
