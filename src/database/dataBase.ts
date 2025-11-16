@@ -116,6 +116,9 @@ class Database {
       game.players.some((player) => player.index === playerIndex)
     );
   }
+  removeGame(gameId: number) {
+    this.games = this.games.filter((game) => game.idGame !== gameId);
+  }
 }
 
 export const db = new Database();

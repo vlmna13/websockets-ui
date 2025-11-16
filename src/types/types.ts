@@ -43,3 +43,28 @@ export interface WebSocketMessage {
   data: string;
   id: 0;
 }
+
+export interface AttackData {
+  gameId: number;
+  x: number;
+  y: number;
+  indexPlayer: number;
+}
+
+export interface RandomAttackData {
+  gameId: number;
+  indexPlayer: number;
+}
+
+export interface AttackResult {
+  position: {
+    x: number;
+    y: number;
+  };
+  currentPlayer: number;
+  status: "miss" | "killed" | "shot";
+}
+
+export interface FinishGameData {
+  winPlayer: number;
+}

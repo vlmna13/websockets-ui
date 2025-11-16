@@ -3,6 +3,7 @@ import { WebSocketMessage } from "../types/types";
 import { handleReg } from "./regHandler";
 import { handleCreateRoom, handleAddUserToRoom } from "./roomHandler";
 import { handleAddShips } from "./gameHandler";
+import { handleAttack, handleRandomAttack } from "./attackHandler";
 
 export const handleMessage = (ws: WebSocket, message: WebSocketMessage) => {
   console.log("Processing message type:", message.type);
@@ -21,12 +22,14 @@ export const handleMessage = (ws: WebSocket, message: WebSocketMessage) => {
         handleAddUserToRoom(ws, data);
         break;
       case "add_ships":
-        console.log("=== ADD_SHIPS COMMAND RECEIVED ===");
-        console.log("Data:", data);
-        console.log("WebSocket state:", ws.readyState);
         handleAddShips(ws, data);
         break;
-
+      case "attack":
+        handleAttack(ws, data);
+        break;
+      case "randomAttack":
+        handleRandomAttack(ws, data);
+        break;
       default:
         console.log("Unknown message type:", message.type);
         ws.send(
